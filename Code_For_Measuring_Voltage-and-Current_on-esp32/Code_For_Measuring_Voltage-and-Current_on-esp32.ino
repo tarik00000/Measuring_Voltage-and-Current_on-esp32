@@ -1,23 +1,22 @@
 #include <WiFi.h>
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
+#include <Adafruit_INA219.h>
 
 // Wi-Fi Credentials
-const char* ssid = "FoxHome";
-const char* password = "ceco0804$";
+const char* ssid = "Name-Wifi";
+const char* password = "Password-wifi";
 
 // Initialize LCD (Most I2C backpacks use address 0x27 or 0x3F, 16 columns, 2 rows)
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
-// Voltage Sensing 
+// Initialize INA219 Current Sensor (I2C address default 0x40, uses SDA/SCL pins)
+Adafruit_INA219 ina219;
+
+// Voltage Sensing (External Divider)
 const int voltagePin = 32; 
 const float R1 = 10000.0;  // 10 kOhm
-const float R2 = 20000.0;  // 20 kOhm
-
-// Current Sensing (GPIO36 belongs to ADC1, safe to use with Wi-Fi)
-const int currentPin = 33;      
-const float MV_PER_AMP = 100.0;   
-const int SAMPLES = 100;  
+const float R2 = 1500.0;   // 1.5 kOhm
 
 void setup() {
   Serial.begin(115200);
@@ -29,9 +28,17 @@ void setup() {
   lcd.setCursor(0, 0);
   lcd.print("Initializing...");
 
+  // Initialize INA219 sensor over I2C (SDA/SCL pins)
+  if (!ina219.begin()) {
+    Serial.println("Failed to find INA219 chip!");
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("INA219 Error!");
+    while (1) { delay(10); }
+  }
+
   // Set pin modes
   pinMode(voltagePin, INPUT);
-  pinMode(currentPin, INPUT);
 
   // Connect to Wi-Fi Network
   WiFi.mode(WIFI_STA); 
@@ -64,44 +71,35 @@ void setup() {
 }
 
 void loop() {
-  // --- VOLTAGE MEASUREMENT ---
+  // --- VOLTAGE MEASUREMENT (External Divider) ---
   float pinMilliVolts = analogReadMilliVolts(voltagePin);
   float voltage_pin = pinMilliVolts / 1000.0;
   float real_voltage = voltage_pin * ((R1 + R2) / R2);
 
-  // --- CURRENT MEASUREMENT ---
-  long sum = 0;
-  for (int i = 0; i < SAMPLES; i++) {
-    sum += analogReadMilliVolts(currentPin);
-    delay(1);
-  }
-  float avgMilliVolts = sum / (float)SAMPLES;
-  
-  
-  float zeroOffset = 2500.0; 
-  float currentAmps = (avgMilliVolts - zeroOffset) / MV_PER_AMP;
- 
+  // --- CURRENT MEASUREMENT (INA219 in mA) ---
+  float current_mA = ina219.getCurrent_mA();
+
   // --- DISPLAY ON SERIAL MONITOR ---
   Serial.print("Voltage: ");
   Serial.print(real_voltage, 2);
   Serial.println(" V");
 
   Serial.print("Current: ");
-  Serial.print(currentAmps, 2);
-  Serial.println(" A");
+  Serial.print(current_mA, 1);
+  Serial.println(" mA");
 
   // --- DISPLAY ON 16x2 LCD ---
-  // Row 1: Voltage (Trailing spaces clear ghost characters from old readings)
+  // Row 1: Voltage
   lcd.setCursor(0, 0);
   lcd.print("Volt: ");
   lcd.print(real_voltage, 2);
   lcd.print(" V      "); 
 
-  // Row 2: Current
+  // Row 2: Current in mA
   lcd.setCursor(0, 1);
-  lcd.print("Amps: ");
-  lcd.print(currentAmps, 2);
-  lcd.print(" A      ");
+  lcd.print("Curr: ");
+  lcd.print(current_mA, 1);
+  lcd.print(" mA     ");
   
   delay(500); // Refresh screen data every half second
 }
